@@ -25,6 +25,7 @@
   "categories": ["Other"],
   "homepage": "https://github.com/AKing-283/Resume-generation-extension",
   "license": "MIT",
+  "publisher": "PuspakDakkata",
   "engines": {
     "vscode": "^1.70.0"
   },
