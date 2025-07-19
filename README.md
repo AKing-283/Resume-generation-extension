@@ -35,6 +35,17 @@ Made with ❤️ for students/developers by Puspak Dakkata.
   - Open Command Palette → Preferences: Open Settings (UI)
   - Search for `resumeGenerator.geminiApiKey` and enter your key.
 
+## How to Add Your Gemini API Key
+
+1. Open VS Code.
+2. Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`).
+3. Type: `Preferences: Open Settings (UI)` and select it.
+4. In the search bar, type: `resumeGenerator.geminiApiKey`
+5. Enter your Gemini API key in the field provided.
+6. Save and use the extension!
+
+> **Tip:** You can get your Gemini API key from [ai.google.dev](https://ai.google.dev/).
+
 ## Support
 
 - [GitHub Repository](https://github.com/AKing-283/Resume-generation-extension)
