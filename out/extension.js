@@ -56,6 +56,94 @@ function activate(context) {
     });
     // Add command to extension subscriptions
     context.subscriptions.push(generateResumeCommand);
+    // Register the command for endorsing a skill
+    const endorseSkillCommand = vscode.commands.registerCommand('resume-generator-for-developers.endorseSkill', async () => {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage('Please open a workspace or folder to endorse a skill.');
+            return;
+        }
+        const workspaceRoot = workspaceFolder.uri.fsPath;
+        const fileService = new FileService_1.FileService(workspaceRoot);
+        // Prompt for skill name
+        const skill = await vscode.window.showInputBox({
+            prompt: 'Enter the skill to endorse (e.g., JavaScript, React)',
+            placeHolder: 'Skill name'
+        });
+        if (!skill) {
+            return;
+        }
+        // Prompt for endorser name
+        const endorser = await vscode.window.showInputBox({
+            prompt: 'Enter your name (endorser)',
+            placeHolder: 'Your name'
+        });
+        if (!endorser) {
+            return;
+        }
+        // Read existing endorsements
+        const endorsements = await fileService.readEndorsements();
+        if (!endorsements[skill]) {
+            endorsements[skill] = [];
+        }
+        if (!endorsements[skill].includes(endorser)) {
+            endorsements[skill].push(endorser);
+        }
+        // Write back to .resume-endorsements.json
+        const fs = require('fs');
+        const path = require('path');
+        const endorsementsPath = path.join(workspaceRoot, '.resume-endorsements.json');
+        fs.writeFileSync(endorsementsPath, JSON.stringify(endorsements, null, 2), 'utf8');
+        vscode.window.showInformationMessage(`Endorsed ${skill} by ${endorser}.`);
+    });
+    context.subscriptions.push(endorseSkillCommand);
+    // Register the command for importing from GitHub
+    const importGitHubCommand = vscode.commands.registerCommand('resume-generator-for-developers.importFromGitHub', async () => {
+        const username = await vscode.window.showInputBox({
+            prompt: 'Enter your GitHub username',
+            placeHolder: 'e.g., octocat'
+        });
+        if (!username) {
+            return;
+        }
+        const profileUrl = `https://api.github.com/users/${username}`;
+        const reposUrl = `https://api.github.com/users/${username}/repos?per_page=100`;
+        try {
+            const profileResp = await fetch(profileUrl);
+            const profile = await profileResp.json();
+            const reposResp = await fetch(reposUrl);
+            const repos = await reposResp.json();
+            // Extract languages from repos
+            const languages = new Set();
+            repos.forEach((repo) => {
+                if (repo.language)
+                    languages.add(repo.language);
+            });
+            const githubData = {
+                name: profile.name,
+                email: profile.email,
+                bio: profile.bio,
+                company: profile.company,
+                location: profile.location,
+                blog: profile.blog,
+                githubUrl: profile.html_url,
+                languages: Array.from(languages),
+                repos: repos.map((repo) => ({
+                    name: repo.name,
+                    description: repo.description,
+                    url: repo.html_url,
+                    language: repo.language
+                }))
+            };
+            // Store in global state for use in resume generation
+            vscode.workspace.getConfiguration().update('resumeGenerator.githubData', githubData, vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage('GitHub profile imported! It will be used in your next resume generation.');
+        }
+        catch (error) {
+            vscode.window.showErrorMessage('Failed to fetch GitHub profile.');
+        }
+    });
+    context.subscriptions.push(importGitHubCommand);
     // Show welcome message
     vscode.window.showInformationMessage('Resume Generator for Developers is ready! Use "Generate Developer Resume" from the Command Palette.');
 }
@@ -100,6 +188,96 @@ async function generateDeveloperResume() {
             // Step 4: Read project files
             progress.report({ increment: 20, message: "Reading project files..." });
             const projectData = await fileService.getProjectFileData();
+            // Extract skills from project files
+            const extractedSkills = [
+                ...(gitData.languages || []),
+                ...(extractFrameworks(projectData) || []),
+                ...(extractDatabases(projectData) || []),
+                ...(projectData.readme?.technologies || []),
+                ...(projectData.readme?.features || [])
+            ];
+            const uniqueExtractedSkills = Array.from(new Set(extractedSkills.filter(Boolean)));
+            // Prompt user for additional skills
+            const userSkillsInput = await vscode.window.showInputBox({
+                prompt: 'Add any additional skills you want to include (comma-separated)',
+                placeHolder: 'e.g., Docker, AWS, GraphQL'
+            });
+            const userSkills = userSkillsInput ? userSkillsInput.split(',').map(s => s.trim()).filter(Boolean) : [];
+            // Merge all skills for the resume
+            function mergeSkills(original) {
+                return Array.from(new Set([
+                    ...(original || []),
+                    ...uniqueExtractedSkills,
+                    ...userSkills
+                ]));
+            }
+            // Read skill endorsements
+            const endorsements = await fileService.readEndorsements();
+            // Prompt for GitHub username and fetch profile data
+            let githubData = undefined;
+            let githubUsername = vscode.workspace.getConfiguration().get('resumeGenerator.githubUsername');
+            if (!githubUsername) {
+                githubUsername = await vscode.window.showInputBox({
+                    prompt: 'Enter your GitHub username (optional, press Enter to skip)',
+                    placeHolder: 'e.g., octocat'
+                });
+                if (githubUsername) {
+                    await vscode.workspace.getConfiguration().update('resumeGenerator.githubUsername', githubUsername, vscode.ConfigurationTarget.Global);
+                }
+            }
+            if (githubUsername) {
+                try {
+                    const profileUrl = `https://api.github.com/users/${githubUsername}`;
+                    const reposUrl = `https://api.github.com/users/${githubUsername}/repos?per_page=100`;
+                    const profileResp = await fetch(profileUrl);
+                    const profile = await profileResp.json();
+                    const reposResp = await fetch(reposUrl);
+                    const repos = await reposResp.json();
+                    const languages = new Set();
+                    const repoDetails = [];
+                    for (const repo of repos) {
+                        if (repo.language)
+                            languages.add(repo.language);
+                        let description = repo.description;
+                        if (!description) {
+                            try {
+                                const readmeResp = await fetch(`https://api.github.com/repos/${githubUsername}/${repo.name}/readme`);
+                                if (readmeResp.ok) {
+                                    const readmeData = await readmeResp.json();
+                                    const content = Buffer.from(readmeData.content, 'base64').toString('utf8');
+                                    description = content.split('\n').slice(0, 10).join(' ').slice(0, 200) || 'No description provided.';
+                                }
+                                else {
+                                    description = 'No description provided.';
+                                }
+                            }
+                            catch {
+                                description = 'No description provided.';
+                            }
+                        }
+                        repoDetails.push({
+                            name: repo.name,
+                            description,
+                            url: repo.html_url,
+                            language: repo.language
+                        });
+                    }
+                    githubData = {
+                        name: profile.name,
+                        email: profile.email,
+                        bio: profile.bio,
+                        company: profile.company,
+                        location: profile.location,
+                        blog: profile.blog,
+                        githubUrl: profile.html_url,
+                        languages: Array.from(languages),
+                        repos: repoDetails
+                    };
+                }
+                catch (error) {
+                    vscode.window.showWarningMessage('Failed to fetch GitHub profile.');
+                }
+            }
             // Step 5: Get user preferences
             progress.report({ increment: 10, message: "Getting user preferences..." });
             const userPreferences = await getUserPreferences();
@@ -112,15 +290,82 @@ async function generateDeveloperResume() {
             if (aiService.isAvailable()) {
                 try {
                     resumeData = await aiService.generateResumeContent(gitData, projectData, userPreferences.userInfo);
+                    // Merge skills into resumeData if present
+                    if (resumeData.skills) {
+                        resumeData.skills.technical = mergeSkills(resumeData.skills.technical);
+                    }
+                    // Merge GitHub data if available
+                    if (githubData) {
+                        if (resumeData.personalInfo) {
+                            resumeData.personalInfo.name = resumeData.personalInfo.name || githubData.name;
+                            resumeData.personalInfo.email = resumeData.personalInfo.email || githubData.email;
+                            resumeData.personalInfo.github = resumeData.personalInfo.github || githubData.githubUrl;
+                        }
+                        if (resumeData.skills) {
+                            resumeData.skills.technical = mergeSkills([...resumeData.skills.technical, ...(githubData.languages || [])]);
+                        }
+                        if (resumeData.projects && githubData.repos) {
+                            const ghProjects = githubData.repos.map((repo) => ({
+                                name: repo.name,
+                                description: repo.description,
+                                technologies: repo.language ? [repo.language] : [],
+                                highlights: [],
+                                url: repo.url
+                            }));
+                            resumeData.projects = [...resumeData.projects, ...ghProjects];
+                        }
+                    }
                 }
                 catch (error) {
                     vscode.window.showWarningMessage(`AI generation failed: ${error}. Using fallback method.`);
                     resumeData = generateFallbackResumeData(gitData, projectData, userPreferences.userInfo);
+                    resumeData.skills.technical = mergeSkills(resumeData.skills.technical);
+                    if (githubData) {
+                        if (resumeData.personalInfo) {
+                            resumeData.personalInfo.name = resumeData.personalInfo.name || githubData.name;
+                            resumeData.personalInfo.email = resumeData.personalInfo.email || githubData.email;
+                            resumeData.personalInfo.github = resumeData.personalInfo.github || githubData.githubUrl;
+                        }
+                        if (resumeData.skills) {
+                            resumeData.skills.technical = mergeSkills([...resumeData.skills.technical, ...(githubData.languages || [])]);
+                        }
+                        if (resumeData.projects && githubData.repos) {
+                            const ghProjects = githubData.repos.map((repo) => ({
+                                name: repo.name,
+                                description: repo.description,
+                                technologies: repo.language ? [repo.language] : [],
+                                highlights: [],
+                                url: repo.url
+                            }));
+                            resumeData.projects = [...resumeData.projects, ...ghProjects];
+                        }
+                    }
                 }
             }
             else {
                 vscode.window.showWarningMessage('AI service not available. Using fallback method.');
                 resumeData = generateFallbackResumeData(gitData, projectData, userPreferences.userInfo);
+                resumeData.skills.technical = mergeSkills(resumeData.skills.technical);
+                if (githubData) {
+                    if (resumeData.personalInfo) {
+                        resumeData.personalInfo.name = resumeData.personalInfo.name || githubData.name;
+                        resumeData.personalInfo.email = resumeData.personalInfo.email || githubData.email;
+                        resumeData.personalInfo.github = resumeData.personalInfo.github || githubData.githubUrl;
+                    }
+                    if (resumeData.skills) {
+                        resumeData.skills.technical = mergeSkills([...resumeData.skills.technical, ...(githubData.languages || [])]);
+                    }
+                    if (resumeData.projects && githubData.repos) {
+                        const ghProjects = githubData.repos.map((repo) => ({
+                            name: repo.name,
+                            description: repo.description,
+                            technologies: repo.language ? [repo.language] : [],
+                            highlights: [],
+                            url: repo.url
+                        }));
+                        resumeData.projects = [...resumeData.projects, ...ghProjects];
+                    }
+                }
             }
             // Step 7: Generate PDF
             progress.report({ increment: 10, message: "Generating PDF..." });
@@ -131,7 +376,7 @@ async function generateDeveloperResume() {
                 format: 'A4',
                 includeColors: true
             };
-            await pdfService.generatePDF(resumeData, pdfOptions);
+            await pdfService.generatePDF(resumeData, pdfOptions, endorsements);
             // Step 8: Show completion message
             progress.report({ increment: 10, message: "Complete!" });
             const openPDF = 'Open PDF';

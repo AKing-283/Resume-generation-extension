@@ -1,6 +1,6 @@
 {
   "name": "awesome-web-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Made with ❤️ for students/developers by Puspak Dakkata. Instantly generate beautiful developer resumes from your codebase, right inside VS Code.",
   "main": "./out/extension.js",
   "activationEvents": [
@@ -50,6 +50,11 @@
           "type": "string",
           "default": "",
           "description": "Your Gemini API Key for AI resume generation"
+        },
+        "resumeGenerator.githubUsername": {
+          "type": "string",
+          "default": "",
+          "description": "Your GitHub username for importing profile data"
         }
       }
     },

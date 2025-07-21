@@ -40,7 +40,7 @@ export class PDFService {
      * @param options PDF generation options
      * @returns Promise<string> Path to generated PDF
      */
-    async generatePDF(resumeData: ResumeData, options: PDFOptions): Promise<string> {
+    async generatePDF(resumeData: ResumeData, options: PDFOptions, endorsements?: Record<string, string[]>): Promise<string> {
         let browser: puppeteer.Browser | null = null;
 
         try {
@@ -54,7 +54,7 @@ export class PDFService {
             const page = await browser.newPage();
 
             // Generate HTML content
-            const htmlContent = this.generateHTML(resumeData, options.style);
+            const htmlContent = this.generateHTML(resumeData, options.style, endorsements);
 
             // Set page content
             await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
@@ -98,9 +98,9 @@ export class PDFService {
      * @param style Resume style
      * @returns string HTML content
      */
-    private generateHTML(resumeData: ResumeData, style: ResumeStyle): string {
+    private generateHTML(resumeData: ResumeData, style: ResumeStyle, endorsements?: Record<string, string[]>): string {
         const css = this.getCSS(style);
-        const html = this.getHTMLTemplate(resumeData);
+        const html = this.getHTMLTemplate(resumeData, endorsements);
 
         return `
 <!DOCTYPE html>
@@ -369,7 +369,7 @@ export class PDFService {
      * @param resumeData Resume data
      * @returns string HTML content
      */
-    private getHTMLTemplate(resumeData: ResumeData): string {
+    private getHTMLTemplate(resumeData: ResumeData, endorsements?: Record<string, string[]>): string {
         return `
             <div class="resume">
                 <!-- Header Section -->
@@ -392,7 +392,7 @@ export class PDFService {
                 <div class="section">
                     <div class="section-title">Technical Skills</div>
                     <div class="skills-grid">
-                        ${this.generateSkillsHTML(resumeData.skills)}
+                        ${this.generateSkillsHTML(resumeData.skills, endorsements)}
                     </div>
                 </div>
 
@@ -416,7 +416,7 @@ export class PDFService {
      * @param skills Skills data
      * @returns string HTML content
      */
-    private generateSkillsHTML(skills: ResumeData['skills']): string {
+    private generateSkillsHTML(skills: ResumeData['skills'], endorsements?: Record<string, string[]>): string {
         const categories = [
             { title: 'Programming Languages', items: skills?.technical || [] },
             { title: 'Frameworks & Libraries', items: skills?.frameworks || [] },
@@ -426,12 +426,21 @@ export class PDFService {
 
         return categories
             .filter(category => Array.isArray(category.items) && category.items.length > 0)
-            .map(category => `
+            .map(category => {
+                const itemsWithEndorsements = category.items.map(skill => {
+                    const endorsers = endorsements && endorsements[skill];
+                    if (endorsers && endorsers.length > 0) {
+                        return `${skill} <span title="Endorsed by: ${endorsers.join(', ')}">⭐ (${endorsers.length})</span>`;
+                    }
+                    return skill;
+                });
+                return `
                 <div class="skill-category">
                     <div class="skill-category-title">${category.title}</div>
-                    <div class="skill-list">${category.items.join(', ')}</div>
+                    <div class="skill-list">${itemsWithEndorsements.join(', ')}</div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
     }
 
     /**

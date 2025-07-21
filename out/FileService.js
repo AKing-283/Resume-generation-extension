@@ -126,6 +126,24 @@ class FileService {
         }
     }
     /**
+     * Read and parse .resume-endorsements.json file
+     * @returns Promise<Record<string, string[]>>
+     */
+    async readEndorsements() {
+        try {
+            const endorsementsPath = path.join(this.workspaceRoot, '.resume-endorsements.json');
+            if (!fs.existsSync(endorsementsPath)) {
+                return {};
+            }
+            const content = fs.readFileSync(endorsementsPath, 'utf8');
+            return JSON.parse(content);
+        }
+        catch (error) {
+            console.error('Error reading .resume-endorsements.json:', error);
+            return {};
+        }
+    }
+    /**
      * Get comprehensive project file data
      * @returns Promise<ProjectFileData>
      */
